@@ -12,61 +12,60 @@ import edu.uw.TaggerflowProtos.TaggingInput;
 import edu.uw.TaggerflowProtos.TaggingResult;
 
 public class Taggerflow {
-	public Taggerflow(String model, String spacesDir) {
-		System.loadLibrary("taggerflow");
-		initializeTensorflow(model, spacesDir);
-	}
+    public Taggerflow(String model, String spacesDir) {
+        System.loadLibrary("taggerflow");
+        initializeTensorflow(model, spacesDir);
+    }
 
-	public static void main(String[] args) {
-		if (args.length != 1) {
-      System.err.println("Missing model directory.");
-			System.exit(1);
-		}
-		final String modelDir = args[0];
-		final Taggerflow tagger = new Taggerflow(modelDir + "/graph.pb", modelDir);
+    public TaggingResult predict(String filename, int maxBatchSize) {
+        try {
+            return TaggingResult.parseFrom(predictPacked(filename, maxBatchSize));
+        } catch (final InvalidProtocolBufferException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-		final TaggingInput.Builder builder = TaggingInput.newBuilder();
-		builder.addSentenceBuilder().addAllWord(
-				Arrays.asList("Visiting relatives can be boring .".split(" ")));
-		final TaggingResult result = tagger.predict(builder.build());
+    public TaggingResult predict(TaggingInput input) {
+        try {
+            return TaggingResult.parseFrom(predictPacked(input.toByteArray()));
+        } catch (final InvalidProtocolBufferException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-		final TaggedSentence sentence = result.getSentence(0);
-		for (final TaggedToken token : sentence.getTokenList()) {
-			System.out.print(token.getWord());
-			for (final SparseValue score : token.getScoreList()) {
-        System.out.print(String.format("|%d=%.4f", score.getIndex(), score.getValue()));
-			}
-			System.out.println();
-		}
-	}
+    private native void closeTensorflow();
 
-  public TaggingResult predict(String filename, int maxBatchSize) {
-		try {
-      return TaggingResult.parseFrom(predictPacked(filename, maxBatchSize));
-		} catch (final InvalidProtocolBufferException e) {
-			throw new RuntimeException(e);
-		}
-	}
+    private native void initializeTensorflow(String model, String spacesDir);
 
-  public TaggingResult predict(TaggingInput input) {
-		try {
-			return TaggingResult.parseFrom(predictPacked(input.toByteArray()));
-		} catch (final InvalidProtocolBufferException e) {
-			throw new RuntimeException(e);
-		}
-	}
+    private native byte[] predictPacked(byte[] packed);
 
-	private native void closeTensorflow();
+    private native byte[] predictPacked(String filename, int maxBatchSize);
 
-	private native void initializeTensorflow(String model, String spacesDir);
+    @Override
+    protected void finalize() throws Throwable {
+        closeTensorflow();
+        super.finalize();
+    }
 
-	private native byte[] predictPacked(byte[] packed);
+    public static void main(String[] args) {
+        if (args.length != 1) {
+            System.err.println("Missing model directory.");
+            System.exit(1);
+        }
+        final String modelDir = args[0];
+        final Taggerflow tagger = new Taggerflow(modelDir + "/graph.pb", modelDir);
 
-  private native byte[] predictPacked(String filename, int maxBatchSize);
+        final TaggingInput.Builder builder = TaggingInput.newBuilder();
+        builder.addSentenceBuilder().addAllWord(Arrays.asList("Visiting relatives can be boring .".split(" ")));
+        final TaggingResult result = tagger.predict(builder.build());
 
-	@Override
-	protected void finalize() throws Throwable {
-		closeTensorflow();
-		super.finalize();
-	}
+        final TaggedSentence sentence = result.getSentence(0);
+        for (final TaggedToken token : sentence.getTokenList()) {
+            System.out.print(token.getWord());
+            for (final SparseValue score : token.getScoreList()) {
+                System.out.print(String.format("|%d=%.4f", score.getIndex(), score.getValue()));
+            }
+            System.out.println();
+        }
+    }
 }

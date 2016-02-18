@@ -13,16 +13,17 @@ using namespace tensorflow;
 using namespace taggerflow;
 namespace pb = google::protobuf;
 
-static std::unique_ptr<Session> session;
-static std::vector<std::unordered_map<std::string, int>> feature_maps(9);
-static std::vector<int> unknown_indexes(9);
-static std::vector<int> oor_indexes(9);
-static std::vector<int> start_indexes(9);
-static std::vector<int> end_indexes(9);
-
 const static int kMaxTokens = 70;
+const static int kNumFeatures = 9;
 const static int kBucketSize = 14;
 const static int kNumBuckets = kMaxTokens/kBucketSize;
+
+static std::unique_ptr<Session> session;
+static std::vector<std::unordered_map<std::string, int>> feature_maps(kNumFeatures);
+static std::vector<int> unknown_indexes(kNumFeatures);
+static std::vector<int> oor_indexes(kNumFeatures);
+static std::vector<int> start_indexes(kNumFeatures);
+static std::vector<int> end_indexes(kNumFeatures);
 
 template <typename Message>
 void jbytes_to_message(jbyteArray buffer, Message *message, JNIEnv *env) {
@@ -86,13 +87,13 @@ void extract_features(const TaggingInput& input, Tensor *indexes, Tensor *num_to
 
   for (int i = 0; i < input.sentence_size(); ++i) {
     int j = 0;
-    for (int k = 0; k < 9; ++k) {
+    for (int k = 0; k < kNumFeatures; ++k) {
       indexes_tensor(i,j,k) = start_indexes[k];
     }
-    j++;
+    ++j;
 
     const TaggingInputSentence& sentence = input.sentence(i);
-    if (sentence.word_size() + 2 <= kMaxTokens + 2) {
+    if (sentence.word_size() <= kMaxTokens) {
       for (const std::string &word : sentence.word()) {
         indexes_tensor(i,j,0) = get_word_feature_index(word, 0);
         indexes_tensor(i,j,1) = get_morpho_feature_index(word, 1, true, 1);
@@ -103,16 +104,16 @@ void extract_features(const TaggingInput& input, Tensor *indexes, Tensor *num_to
         indexes_tensor(i,j,6) = get_morpho_feature_index(word, 2, false, 6);
         indexes_tensor(i,j,7) = get_morpho_feature_index(word, 3, false, 7);
         indexes_tensor(i,j,8) = get_morpho_feature_index(word, 4, false, 8);
-        j++;
+        ++j;
       }
     }
-    for (int k = 0; k < 9; k++) {
+    for (int k = 0; k < kNumFeatures; ++k) {
       indexes_tensor(i,j,k) = end_indexes[k];
     }
-    j++;
+    ++j;
     num_tokens_tensor(i) = j;
-    for (; j < 72; j++) {
-      for (int k = 0; k < 9; k++) {
+    for (; j < kMaxTokens + 2; ++j) {
+      for (int k = 0; k < kNumFeatures; ++k) {
         indexes_tensor(i,j,k) = 0;
       }
     }
@@ -132,7 +133,7 @@ void read_sentences(const char * filename, TaggingInput *input) {
 }
 
 void parse_input(const TaggingInput& input, TaggingResult *result) {
-  Tensor indexes(DT_INT32, TensorShape({ input.sentence_size(), 72, 9 }));
+  Tensor indexes(DT_INT32, TensorShape({ input.sentence_size(), kMaxTokens + 2, kNumFeatures }));
   Tensor num_tokens(DT_INT64, TensorShape({ input.sentence_size() }));
 
   std::vector<std::pair<std::string, Tensor>> inputs = {
@@ -156,11 +157,11 @@ void parse_input(const TaggingInput& input, TaggingResult *result) {
     int n = num_tokens_vec(i) - 2;
 
     TaggedSentence *sentence = result->add_sentence();
-    for (int j = 0; j < n; j++) {
-      // Offset by 1 to account for <s>.
+    for (int j = 0; j < n; ++j) {
       float max_score = -std::numeric_limits<double>::infinity();
       int max_index = 0;
-      for (int k = 0; k < num_supertags; k++) {
+      for (int k = 0; k < num_supertags; ++k) {
+        // Offset by 1 to account for <s>.
         if (scores(i,j+1,k) > max_score) {
           max_score = scores(i,j+1,k);
           max_index = k;
@@ -174,10 +175,10 @@ void parse_input(const TaggingInput& input, TaggingResult *result) {
       // Max score goes first.
       SparseValue *score = token->add_score();
       score->set_index(max_index);
-      score->set_value(scores(i,j+1,max_index));
+      score->set_value(max_score);
 
       // Adding the remaining supertags that score above the threshold.
-      for (int k = 0; k < num_supertags; k++) {
+      for (int k = 0; k < num_supertags; ++k) {
         if (scores(i,j+1,k) > prune_threshold && k != max_index) {
           SparseValue *score = token->add_score();
           score->set_index(k);
@@ -234,17 +235,14 @@ JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_initializeTensorflow(JNIEnv* env, 
 
   // Setup commonly used indexes.
   unknown_indexes[0] = feature_maps[0].at("*unknown*");
-  for (int i = 1; i < 9; i++) {
+  for (int i = 1; i < kNumFeatures; ++i) {
     unknown_indexes[i] = feature_maps[i].at("*UNKNOWN*");
     std::unordered_map<std::string,int>::const_iterator it = feature_maps[i].find("*OOR*");
-    if (it == feature_maps[i].end()) {
-      std::cerr << "Out-of-range marker not found for affix " << i << " (expected for 1 and 5)" << std::endl;
-    }
-    else {
+    if (it != feature_maps[i].end()) {
       oor_indexes[i] = it->second;
     }
   }
-  for (int i = 0; i < 9; i++) {
+  for (int i = 0; i < kNumFeatures; ++i) {
     start_indexes[i] = feature_maps[i].at("<s>");
     end_indexes[i] = feature_maps[i].at("</s>");
   }
