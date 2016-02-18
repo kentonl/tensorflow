@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<project name="Taggerflow" default="jni" basedir=".">
+  <property name="src" location="src"/>
+  <target name="jni">
+    <javah outputFile="taggerflow.h" classpath="${src}">
+      <class name="edu.uw.Taggerflow"/>
+    </javah>
+  </target>
+</project>
