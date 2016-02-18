@@ -301,6 +301,16 @@ new_git_repository(
   tag = "v1.0.5",
 )
 
+# Replace the following with your local path to Java.
+new_local_repository(
+    name = "jni",
+    build_file = "jni.BUILD",
+    # Mac
+    path = "/Library/Java/JavaVirtualMachines/jdk1.8.0_60.jdk/Contents/Home/include",
+    # Ubuntu
+    #path = "/usr/lib/jvm/java-8-oracle/include",
+)
+
 new_git_repository(
   name = "lodash",
   build_file = "bower.BUILD",

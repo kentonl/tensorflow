@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package taggerflow;
+option java_outer_classname = "TaggerflowProtos";
+option java_package = "edu.uw";
+option cc_enable_arenas = true;
+
+message TaggingResult {
+  repeated TaggedSentence sentence = 1;
+}
+
+message TaggingInput {
+  repeated TaggingInputSentence sentence = 1;
+}
+
+message TaggingInputSentence {
+  repeated string word = 1;
+}
+
+message TaggedSentence {
+  repeated TaggedToken token = 1;
+}
+
+message TaggedToken {
+  string word = 1;
+  repeated SparseValue score = 2;
+}
+
+message SparseValue {
+  int32 index = 1;
+  float value = 2;
+}

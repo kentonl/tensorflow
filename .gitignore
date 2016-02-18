@@ -17,3 +17,5 @@ node_modules
 /util/python/python_include
 /util/python/python_lib
 /pip_test
+deploy.sh
+deploy_pip.sh
