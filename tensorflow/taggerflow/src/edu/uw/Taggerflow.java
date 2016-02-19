@@ -12,14 +12,15 @@ import edu.uw.TaggerflowProtos.TaggingInput;
 import edu.uw.TaggerflowProtos.TaggingResult;
 
 public class Taggerflow {
+    private final long session;
     public Taggerflow(String model, String spacesDir) {
         System.loadLibrary("taggerflow");
-        initializeTensorflow(model, spacesDir);
+        session = initialize(model, spacesDir);
     }
 
     public TaggingResult predict(String filename, int maxBatchSize) {
         try {
-            return TaggingResult.parseFrom(predictPacked(filename, maxBatchSize));
+            return TaggingResult.parseFrom(predictPacked(filename, maxBatchSize, session));
         } catch (final InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
         }
@@ -27,25 +28,26 @@ public class Taggerflow {
 
     public TaggingResult predict(TaggingInput input) {
         try {
-            return TaggingResult.parseFrom(predictPacked(input.toByteArray()));
+            return TaggingResult.parseFrom(predictPacked(input.toByteArray(), session));
         } catch (final InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private native void closeTensorflow();
-
-    private native void initializeTensorflow(String model, String spacesDir);
-
-    private native byte[] predictPacked(byte[] packed);
-
-    private native byte[] predictPacked(String filename, int maxBatchSize);
-
     @Override
     protected void finalize() throws Throwable {
-        closeTensorflow();
+        close(session);
         super.finalize();
     }
+
+    private static native void close(long session);
+
+    private static native long initialize(String model, String spacesDir);
+
+    private static native byte[] predictPacked(byte[] packed, long session);
+
+    private static native byte[] predictPacked(String filename, int maxBatchSize, long session);
+
 
     public static void main(String[] args) {
         if (args.length != 1) {

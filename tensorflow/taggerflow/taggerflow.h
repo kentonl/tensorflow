@@ -9,35 +9,35 @@ extern "C" {
 #endif
 /*
  * Class:     edu_uw_Taggerflow
- * Method:    closeTensorflow
- * Signature: ()V
+ * Method:    close
+ * Signature: (J)V
  */
-JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_closeTensorflow
-  (JNIEnv *, jobject);
+JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_close
+  (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     edu_uw_Taggerflow
- * Method:    initializeTensorflow
- * Signature: (Ljava/lang/String;Ljava/lang/String;)V
+ * Method:    initialize
+ * Signature: (Ljava/lang/String;Ljava/lang/String;)J
  */
-JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_initializeTensorflow
-  (JNIEnv *, jobject, jstring, jstring);
-
-/*
- * Class:     edu_uw_Taggerflow
- * Method:    predictPacked
- * Signature: ([B)[B
- */
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked___3B
-  (JNIEnv *, jobject, jbyteArray);
+JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize
+  (JNIEnv *, jclass, jstring, jstring);
 
 /*
  * Class:     edu_uw_Taggerflow
  * Method:    predictPacked
- * Signature: (Ljava/lang/String;I)[B
+ * Signature: ([BJ)[B
  */
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked__Ljava_lang_String_2I
-  (JNIEnv *, jobject, jstring, jint);
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked___3BJ
+  (JNIEnv *, jclass, jbyteArray, jlong);
+
+/*
+ * Class:     edu_uw_Taggerflow
+ * Method:    predictPacked
+ * Signature: (Ljava/lang/String;IJ)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked__Ljava_lang_String_2IJ
+  (JNIEnv *, jclass, jstring, jint, jlong);
 
 #ifdef __cplusplus
 }
