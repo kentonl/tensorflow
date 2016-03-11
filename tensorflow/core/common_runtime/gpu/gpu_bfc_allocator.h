@@ -67,6 +67,8 @@ class GPUBFCAllocator : public VisitableAllocator {
 
   int64 AllocationId(void* ptr) override;
 
+  void GetStats(AllocatorStats* stats) override;
+
  private:
   struct Bin;
 
@@ -119,7 +121,7 @@ class GPUBFCAllocator : public VisitableAllocator {
     // What bin are we in?
     BinNum bin_num = kInvalidBinNum;
 
-    bool in_use() { return allocation_id != -1; }
+    bool in_use() const { return allocation_id != -1; }
 
     string DebugString(GPUBFCAllocator* a, bool recurse) {
       string dbg;
@@ -222,6 +224,10 @@ class GPUBFCAllocator : public VisitableAllocator {
   void RemoveFreeChunkFromBin(ChunkHandle h) EXCLUSIVE_LOCKS_REQUIRED(lock_);
   void DeleteChunk(ChunkHandle h) EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
+  void RenderRegion(char* rendered, size_t resolution, const void* ptr,
+                    size_t offset, size_t size, char c)
+      EXCLUSIVE_LOCKS_REQUIRED(lock_);
+  string RenderOccupancy() EXCLUSIVE_LOCKS_REQUIRED(lock_);
   void DumpMemoryLog(size_t num_bytes) EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   ChunkHandle AllocateChunk() EXCLUSIVE_LOCKS_REQUIRED(lock_);
@@ -280,6 +286,9 @@ class GPUBFCAllocator : public VisitableAllocator {
   // Counter containing the next unique identifier to assign to a
   // newly-created chunk.
   int64 next_allocation_id_ GUARDED_BY(lock_);
+
+  // Stats.
+  AllocatorStats stats_ GUARDED_BY(lock_);
 
   TF_DISALLOW_COPY_AND_ASSIGN(GPUBFCAllocator);
 };

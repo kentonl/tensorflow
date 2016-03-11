@@ -57,11 +57,15 @@ class UnaryOpTest(tf.test.TestCase):
       self.assertShapeEqual(np_ans, y)
       self.assertAllClose(np_ans, tf_cpu)
 
-      # TODO(ebrevdo): add gradient for lgamma (digamma) and remove lgamma here.
-      if tf_func in (tf.lgamma,):
+      # TODO(ebrevdo): consider adding polygamma function
+      if tf_func in (tf.digamma,):
         return  # Return early
 
-      if x.dtype == np.float32:
+      if x.dtype == np.complex64 and tf_func in (
+          tf.abs, _ABS, tf.sqrt, tf.rsqrt, tf.log):
+        return  # Return early
+
+      if x.dtype == np.float32 or x.dtype == np.complex64:
         s = list(np.shape(x))
         jacob_t, jacob_n = tf.test.compute_gradient(inx,
                                                     s,
@@ -131,7 +135,7 @@ class UnaryOpTest(tf.test.TestCase):
     self._compareBoth(x, np.sin, tf.sin)
     self._compareBoth(x, np.cos, tf.cos)
     self._compareBoth(
-        x,
+        y,
         np.vectorize(self._replace_domain_error_with_inf(math.lgamma)),
         tf.lgamma)
     self._compareBoth(x, np.vectorize(math.erf), tf.erf)
@@ -160,6 +164,10 @@ class UnaryOpTest(tf.test.TestCase):
     self._compareBoth(x, np.sign, tf.sign)
     self._compareBoth(x, np.sin, tf.sin)
     self._compareBoth(x, np.cos, tf.cos)
+    # Can't use vectorize below, so just use some arbitrary function
+    self._compareBoth(x, np.sign, tf.lgamma)
+    self._compareBoth(x, np.sign, tf.erf)
+    self._compareBoth(x, np.sign, tf.erfc)
 
   def testDoubleBasic(self):
     x = np.arange(-3, 3).reshape(1, 3, 2).astype(np.float64)
@@ -180,6 +188,12 @@ class UnaryOpTest(tf.test.TestCase):
     self._compareBoth(y, np.sign, tf.sign)
     self._compareBoth(x, np.sin, tf.sin)
     self._compareBoth(x, np.cos, tf.cos)
+    self._compareBoth(
+        y,
+        np.vectorize(self._replace_domain_error_with_inf(math.lgamma)),
+        tf.lgamma)
+    self._compareBoth(x, np.vectorize(math.erf), tf.erf)
+    self._compareBoth(x, np.vectorize(math.erfc), tf.erfc)
 
   def testInt32Basic(self):
     x = np.arange(-6, 6, 2).reshape(1, 3, 2).astype(np.int32)
@@ -952,6 +966,17 @@ class SelectOpTest(tf.test.TestCase):
       yt = y.astype(t)
       with self.assertRaises(ValueError):
         tf.select(c, xt, yt)
+
+  def testEmptyTensor(self):
+    c = np.random.randint(0, 3, 0).astype(np.bool).reshape(1, 3, 0)
+    x = np.random.rand(1, 3, 0) * 100
+    y = np.random.rand(1, 3, 0) * 100
+    z_expected = np.zeros((1, 3, 0), dtype=np.float32)
+    with self.test_session():
+      xt = x.astype(np.float32)
+      yt = y.astype(np.float32)
+      z = tf.select(c, xt, yt).eval()
+      self.assertAllEqual(z_expected, z)
 
 
 class BatchSelectOpTest(tf.test.TestCase):

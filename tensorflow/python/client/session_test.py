@@ -25,8 +25,8 @@ import numpy as np
 import six
 from six.moves import xrange  # pylint: disable=redefined-builtin
 
-from tensorflow.core.framework import config_pb2
 from tensorflow.core.lib.core import error_codes_pb2
+from tensorflow.core.protobuf import config_pb2
 from tensorflow.python.client import session
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
@@ -107,6 +107,19 @@ class SessionTest(test_util.TensorFlowTestCase):
       a = array_ops.placeholder(dtypes.float32)
       with self.assertRaisesOpError(lambda e: e.op == a.op):
         a.eval()
+
+  def testErrorCodeWithNoNodeDef(self):
+    with session.Session() as s:
+      a = array_ops.placeholder(dtypes.float32, shape=[])
+      b = array_ops.placeholder(dtypes.float32, shape=[])
+      r1 = math_ops.add(a, b)
+
+      def exc_predicate(e):
+        return (e.op is None and e.node_def is None and
+                e.error_code == error_codes_pb2.INVALID_ARGUMENT)
+      with self.assertRaisesOpError(exc_predicate):
+        # Run with a bogus handle.
+        s.partial_run('foo', r1, feed_dict={a: 1, b: 2})
 
   def testOpConstructionErrorPayload(self):
     with session.Session():
@@ -750,7 +763,9 @@ class SessionTest(test_util.TensorFlowTestCase):
       self.assertEqual(c_list[1], out[1].decode('utf-8'))
 
   def testInvalidTargetFails(self):
-    with self.assertRaises(RuntimeError):
+    with self.assertRaisesRegexp(
+        RuntimeError,
+        'No session factory registered for the given session options.'):
       session.Session('INVALID_TARGET')
 
   def testFetchByNameDifferentStringTypes(self):
