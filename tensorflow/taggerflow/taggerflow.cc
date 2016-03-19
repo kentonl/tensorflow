@@ -169,7 +169,7 @@ void parse_input(const TaggingInput& input, MetaSession *meta_session, TaggingRe
           max_index = k;
         }
       }
-      float prune_threshold = log(1e-6) + max_score;
+      float prune_threshold = log(1e-5) + max_score;
 
       TaggedToken *token = sentence->add_token();
       token->set_word(input.sentence(i).word(j));
