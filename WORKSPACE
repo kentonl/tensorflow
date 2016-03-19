@@ -225,9 +225,9 @@ new_local_repository(
     name = "jni",
     build_file = "jni.BUILD",
     # Mac
-    path = "/Library/Java/JavaVirtualMachines/jdk1.8.0_60.jdk/Contents/Home/include",
+    #path = "/Library/Java/JavaVirtualMachines/jdk1.8.0_60.jdk/Contents/Home/include",
     # Ubuntu
-    #path = "/usr/lib/jvm/java-8-oracle/include",
+    path = "/usr/lib/jvm/java-8-oracle/include",
 )
 
 new_http_archive(

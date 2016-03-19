@@ -5,7 +5,6 @@ load("@protobuf//:protobuf.bzl", "py_proto_library")
 
 # configure may change the following lines to True
 WITH_GCP_SUPPORT = False
-WITH_HDFS_SUPPORT = False
 
 # Appends a suffix to a list of deps.
 def tf_deps(deps, suffix):
