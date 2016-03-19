@@ -47,6 +47,7 @@ load("//tensorflow:tensorflow.bzl", "tf_copts")
 load("//tensorflow:tensorflow.bzl", "tf_cc_tests")
 load("//tensorflow:tensorflow.bzl", "tf_cuda_library")
 load("//tensorflow:tensorflow.bzl", "tf_gen_op_libs")
+load("//tensorflow:tensorflow.bzl", "cc_header_only_library")
 
 # For platform specific build config
 load(
@@ -254,6 +255,7 @@ tf_cuda_library(
         "util/device_name_utils.h",
         "util/events_writer.h",
         "util/guarded_philox_random.h",
+        "util/mirror_pad_mode.h",
         "util/padding.h",
         "util/port.h",
         "util/saved_tensor_slice_util.h",
@@ -269,22 +271,6 @@ tf_cuda_library(
     ],
     visibility = ["//visibility:public"],
     deps = [":framework_internal"],
-)
-
-cc_binary(
-    name = "libtensorflow_framework.so",
-    srcs = [],
-    linkopts = select({
-        "//conditions:default": [
-            "-Wl,-Bsymbolic",
-            "-lm",
-        ],
-        "//tensorflow:darwin": [],
-    }),
-    linkshared = 1,
-    linkstatic = 1,
-    visibility = ["//visibility:public"],
-    deps = [":framework"],
 )
 
 # Generates library per group of ops.
@@ -361,7 +347,7 @@ cc_library(
 cc_library(
     name = "array_grad",
     srcs = ["ops/array_grad.cc"],
-    linkstatic = 1,  # Seems to be needed since alwayslink is broken in bazel
+    linkstatic = 1,  # Needed since alwayslink is broken in bazel b/27630669
     visibility = ["//visibility:public"],
     deps = [
         ":array_ops_op_lib",
@@ -374,7 +360,7 @@ cc_library(
 cc_library(
     name = "functional_grad",
     srcs = ["ops/functional_grad.cc"],
-    linkstatic = 1,  # Seems to be needed since alwayslink is broken in bazel
+    linkstatic = 1,  # Needed since alwayslink is broken in bazel b/27630669
     visibility = ["//visibility:public"],
     deps = [
         ":framework",
@@ -387,7 +373,7 @@ cc_library(
 cc_library(
     name = "math_grad",
     srcs = ["ops/math_grad.cc"],
-    linkstatic = 1,  # Seems to be needed since alwayslink is broken in bazel
+    linkstatic = 1,  # Needed since alwayslink is broken in bazel b/27630669
     visibility = ["//visibility:public"],
     deps = [
         ":framework",
@@ -400,7 +386,7 @@ cc_library(
 cc_library(
     name = "nn_grad",
     srcs = ["ops/nn_grad.cc"],
-    linkstatic = 1,  # Seems to be needed since alwayslink is broken in bazel
+    linkstatic = 1,  # Needed since alwayslink is broken in bazel b/27630669
     visibility = ["//visibility:public"],
     deps = [
         ":framework",
@@ -416,6 +402,7 @@ tf_cuda_library(
         "common_runtime/device.h",
         "graph/algorithm.h",
         "graph/default_device.h",
+        "graph/gradients.h",
         "graph/graph.h",
         "graph/graph_constructor.h",
         "graph/graph_def_builder.h",
@@ -561,8 +548,6 @@ filegroup(
             "graph/**/*.cc",
             "lib/**/*.h",
             "lib/**/*.cc",
-            "ops/**/*.cc",
-            "ops/**/*.h",
             "platform/*.h",
             "platform/*.cc",
             "platform/**/*.h",
@@ -617,6 +602,7 @@ ANDROID_TF_COPTS = [
     "-mfpu=neon",
     "-std=c++11",
     "-DMIN_LOG_LEVEL=0",
+    "-DTF_LEAN_BINARY",
     "-O2",
 ]
 
@@ -661,6 +647,7 @@ cc_library(
 cc_library(
     name = "android_tensorflow_lib",
     srcs = [
+        ":android_op_registrations_and_gradients",
         "//tensorflow/core/kernels:android_core_ops",
         "//tensorflow/core/kernels:android_extended_ops",
     ],
@@ -681,8 +668,25 @@ cc_library(
     ],
 )
 
+filegroup(
+    name = "android_op_registrations_and_gradients",
+    srcs = glob(
+        [
+            "ops/**/*.cc",
+            "ops/**/*.h",
+        ],
+        exclude = [
+            "**/*test.cc",
+            "**/*testutil*",
+            "**/*testlib*",
+            "**/*main.cc",
+        ],
+    ),
+    visibility = ["//visibility:public"],
+)
+
 # -----------------------------------------------------------------------------
-# Libraries for GPU facilities that are useful for writing kernels.
+# Libraries with GPU facilities that are useful for writing kernels.
 cc_library(
     name = "gpu_lib",
     srcs = [
@@ -690,7 +694,6 @@ cc_library(
     ],
     hdrs = [
         "common_runtime/gpu/gpu_event_mgr.h",
-        "common_runtime/gpu_device_context.h",
     ],
     copts = tf_copts(),
     visibility = ["//visibility:public"],
@@ -701,6 +704,14 @@ cc_library(
         ":lib_internal",
         ":protos_all_cc",
         ":stream_executor",
+    ],
+)
+
+cc_library(
+    name = "cuda",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//tensorflow/core/platform/default/build_config:cuda",
     ],
 )
 
@@ -789,9 +800,24 @@ tf_cuda_library(
         ":lib",
         ":lib_internal",
         ":protos_all_cc",
+        "//tensorflow/core/kernels:bounds_check",
         "//third_party/eigen3",
     ],
     alwayslink = 1,
+)
+
+cc_header_only_library(
+    name = "framework_headers_lib",
+    deps = [
+        ":framework",
+    ],
+)
+
+cc_header_only_library(
+    name = "stream_executor_headers_lib",
+    deps = [
+        ":stream_executor",
+    ],
 )
 
 filegroup(
@@ -923,21 +949,11 @@ tf_cuda_library(
     alwayslink = 1,
 )
 
-cc_library(
-    name = "cuda",
-    deps = [
-        "//tensorflow/core/platform/default/build_config:cuda",
-    ],
-)
-
 tf_cuda_library(
     name = "direct_session",
     srcs = ["common_runtime/direct_session.cc"],
     hdrs = ["common_runtime/direct_session.h"],
     copts = tf_copts(),
-    cuda_deps = [
-        ":cuda",
-    ],
     linkstatic = 1,
     deps = [
         ":core_cpu_internal",
@@ -963,6 +979,7 @@ tf_cuda_library(
         "common_runtime/gpu/gpu_util_platform_specific.cc",
         "common_runtime/gpu/pool_allocator.cc",
         "common_runtime/gpu/process_state.cc",
+        "common_runtime/gpu_device_context.h",
     ],
     hdrs = [
         "common_runtime/gpu/gpu_allocator_retry.h",
@@ -977,9 +994,6 @@ tf_cuda_library(
         "common_runtime/gpu/visitable_allocator.h",
     ],
     copts = tf_copts(),
-    cuda_deps = [
-        ":cuda",
-    ],
     linkstatic = 1,
     deps = [
         ":core_cpu",

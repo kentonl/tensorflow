@@ -104,7 +104,7 @@ def _MergeGrad(op, grad, _):
       # use the accumulated values as the predicate for this backprop switch.
       grad_state = grad_ctxt.grad_state
       real_pred = grad_state.history_map.get(pred.name)
-      if not real_pred:
+      if real_pred is None:
         # Remember the value of pred for every iteration.
         grad_ctxt = grad_state.grad_context
         grad_ctxt.Exit()
@@ -142,7 +142,7 @@ def _ExitGrad(_, grad):
   # pylint: enable=protected-access
   if not grad_ctxt.back_prop:
     # The flag `back_prop` is set by users to suppress gradient
-    # computation for this loop. If the flag `back_prop` is true,
+    # computation for this loop. If the attribute `back_prop` is false,
     # no gradient computation.
     return None
   grad_ctxt.AddName(grad.name)
@@ -184,7 +184,7 @@ def _EnterGrad(op, grad):
   grad_ctxt = graph._get_control_flow_context()
   # pylint: enable=protected-access
   if not grad_ctxt.back_prop:
-    # If the flag `back_prop` is true, no gradient computation.
+    # If the attribute `back_prop` is true, no gradient computation.
     return grad
   if op.get_attr("is_constant"):
     # Add a gradient accumulator for each loop invariant.
