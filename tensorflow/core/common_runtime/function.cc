@@ -39,6 +39,8 @@ static const char* const kArgOp = "_Arg";
 static const char* const kRetOp = "_Retval";
 static const char* const kGradientOp = "SymbolicGradient";
 static const char* const kNodeLabel = "Func";
+static const char* const kFuncAttr = "f";
+static const char* const kNoinlineAttr = "noinline";
 
 // Represents the index-th output of a node.
 struct Endpoint {
@@ -261,7 +263,7 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
                            FunctionBody** fbody);
   Status CreateItem(Handle handle, Item** item);
   Status GetOrCreateItem(Handle handle, Item** item);
-  Status InstantiateSymbolicGradient(const InstantiateAttrValueMap& attrs,
+  Status InstantiateSymbolicGradient(const NameAttrList& func,
                                      FunctionBody** g_body);
 
   TF_DISALLOW_COPY_AND_ASSIGN(FunctionLibraryRuntimeImpl);
@@ -363,8 +365,12 @@ class SymbolicGradientOp : public AsyncOpKernel {
              [ctx, done, rets](const Status& status) {
                if (!status.ok()) {
                  ctx->SetStatus(status);
+               } else if (rets->size() != ctx->num_outputs()) {
+                 ctx->SetStatus(errors::InvalidArgument(
+                     "SymGrad expects to return ", ctx->num_outputs(),
+                     " tensor(s), but get ", rets->size(),
+                     " tensor(s) instead."));
                } else {
-                 CHECK_EQ(rets->size(), ctx->num_outputs());
                  for (size_t i = 0; i < rets->size(); ++i) {
                    ctx->set_output(i, (*rets)[i]);
                  }
@@ -455,12 +461,7 @@ Status FunctionLibraryRuntimeImpl::FunctionDefToBody(
 }
 
 Status FunctionLibraryRuntimeImpl::InstantiateSymbolicGradient(
-    const InstantiateAttrValueMap& attrs, FunctionBody** g_body) {
-  const AttrValue* f = gtl::FindOrNull(attrs, "f");
-  if (f == nullptr) {
-    return errors::InvalidArgument("SymbolicGradient is missing attr: f");
-  }
-  const auto& func = f->func();
+    const NameAttrList& func, FunctionBody** g_body) {
   const FunctionDef* fdef = lib_def_->Find(func.name());
   if (fdef == nullptr) {
     // f is a primitive op.
@@ -499,7 +500,19 @@ Status FunctionLibraryRuntimeImpl::Instantiate(
   Status s;
   FunctionBody* fbody = nullptr;
   if (function_name == kGradientOp) {
-    TF_RETURN_IF_ERROR(InstantiateSymbolicGradient(attrs, &fbody));
+    const AttrValue* f = gtl::FindOrNull(attrs, kFuncAttr);
+    if (f == nullptr) {
+      return errors::InvalidArgument("SymbolicGradient is missing attr: f");
+    }
+    const auto& func = f->func();
+    if (func.name() == kGradientOp) {
+      return errors::InvalidArgument("Can't take gradient of SymbolicGradient");
+    }
+    const string grad = lib_def_->FindGradient(func.name());
+    if (!grad.empty()) {
+      return Instantiate(grad, func.attr(), handle);
+    }
+    TF_RETURN_IF_ERROR(InstantiateSymbolicGradient(func, &fbody));
   } else {
     const FunctionDef* fdef = lib_def_->Find(function_name);
     if (fdef == nullptr) {
@@ -977,10 +990,49 @@ static void InlineFunctionBody(Graph* g, Node* caller,
   g->RemoveNode(caller);  // 'caller' is replaced with inlined nodes.
 }
 
+// Given a node's NodeDef, returns false iff the node explicitly
+// specified noinline. This gives ExpandInlineFunctions a heuristic to
+// decide whether to inline the function.
+bool ShouldInline(const NodeDef& ndef) {
+  bool noinline = false;
+  if (GetNodeAttr(ndef, kNoinlineAttr, &noinline).ok()) {
+    // If the node specifies attribute 'noinlne', returns accordingly.
+    return !noinline;
+  }
+  if (ndef.op() != kGradientOp) {
+    // If the op is not SymbolicGradient, we should be free to decide
+    // whether to inline or not.
+    return true;
+  }
+  // If the node is a SymbolicGradient, we use the the forward
+  // function's attribute 'noinline' instead.
+  const NameAttrList* forward_func_attrs;
+  Status s =
+      GetNodeAttr(AttrSlice(&ndef.attr()), kFuncAttr, &forward_func_attrs);
+  if (!s.ok()) {
+    // The node def is malformed (missing attribute 'f'), we'll just
+    // continue and the runtime will error out.
+    return false;
+  }
+  s = GetNodeAttr(AttrSlice(&forward_func_attrs->attr()), kNoinlineAttr,
+                  &noinline);
+  if (!s.ok()) {
+    // The forward function doesn't specify 'noinline' attr, we should
+    // be free to decide.
+    return true;
+  }
+  // Otherwise, make inline decision according to the attr.
+  return !noinline;
+}
+
 bool ExpandInlineFunctions(FunctionLibraryRuntime* lib, Graph* graph) {
   std::vector<std::pair<Node*, const FunctionBody*>> candidates;
   for (Node* node : graph->nodes()) {
     VLOG(3) << "Expanding " << node->DebugString();
+    if (!ShouldInline(node->def())) {
+      VLOG(3) << "noinline: " << node->DebugString();
+      continue;
+    }
     FunctionLibraryRuntime::Handle handle;
     Status s =
         lib->Instantiate(node->type_string(), node->def().attr(), &handle);
@@ -1170,37 +1222,44 @@ FunctionBody* SymbolicGradientHelper::Compute() {
   Copy();
 
   Graph* g = gbody_->graph;
+
+  const int num_y = gbody_->ret_nodes.size();
+
+  // Populate 'y_node_outputs_' with node function body outputs.
   // Populate 'y_grad_nodes' with initial gradient nodes for each return node of
   // the original function body (these will be 'arg' nodes in the function
   // gradient body).
-  const int num_y = gbody_->ret_nodes.size();
-  std::vector<Node*> y_grad_nodes;
-  y_grad_nodes.reserve(num_y);
+  std::vector<NodeOut> y_node_outputs;
+  y_node_outputs.reserve(num_y);
+  std::vector<NodeOut> y_grad_node_outputs;
+  y_grad_node_outputs.reserve(num_y);
   for (int i = 0; i < num_y; ++i) {
     Node* y = gbody_->ret_nodes[i];
+    y_node_outputs.push_back({y, 0});
     DCHECK_EQ(y->type_string(), kRetOp);
     const DataType dtype = y->input_type(0);
     const int index = gbody_->arg_nodes.size();
     Node* dy = AddArg(g, dtype, index);
     gbody_->arg_types.push_back(dtype);
     gbody_->arg_nodes.push_back(dy);
-    y_grad_nodes.push_back(dy);
+    y_grad_node_outputs.push_back({dy, 0});
   }
 
-  // Populate 'x_nodes' with function args (not including 'y_grad_nodes').
+  // Populate 'x_nodes' with function args (excluding 'y_grad_node_outputs').
   const int num_x = fbody_->arg_nodes.size();
-  std::vector<Node*> x_nodes;
-  x_nodes.reserve(num_x);
+  std::vector<NodeOut> x_node_outputs;
+  x_node_outputs.reserve(num_x);
   for (size_t i = 0; i < fbody_->arg_nodes.size(); ++i) {
-    x_nodes.push_back(gbody_->arg_nodes[i]);
+    x_node_outputs.push_back({gbody_->arg_nodes[i], 0});
   }
 
   // Call AddSymbolicGradients which will add nodes to graph 'g' that
-  // compute the function gradient (adding an entry in 'x_grad_nodes' for
-  // each node in 'x_nodes').
-  std::vector<GradNodeOutput> x_grad_nodes(x_nodes.size());
-  TF_CHECK_OK(AddSymbolicGradients(gbody_->ret_nodes, x_nodes, y_grad_nodes,
-                                   &x_grad_nodes, g));
+  // compute the function gradient (adding an entry in 'x_grad_node_outputs' for
+  // each node in 'x_node_outputs').
+  std::vector<NodeOut> x_grad_node_outputs;
+  TF_CHECK_OK(AddSymbolicGradients(y_node_outputs, x_node_outputs,
+                                   y_grad_node_outputs, &x_grad_node_outputs,
+                                   g));
 
   // Remove the old return nodes from the function body.
   for (Node* n : gbody_->ret_nodes) {
@@ -1211,7 +1270,7 @@ FunctionBody* SymbolicGradientHelper::Compute() {
   // Add new return nodes to the function gradient body for each node
   // in 'x_grad_nodes'.
   for (size_t i = 0; i < fbody_->arg_types.size(); ++i) {
-    Endpoint grad = {x_grad_nodes[i].node, x_grad_nodes[i].index};
+    Endpoint grad = {x_grad_node_outputs[i].node, x_grad_node_outputs[i].index};
     Node* ret = AddRet(g, grad, i);
     gbody_->ret_nodes.push_back(ret);
   }
