@@ -1,7 +1,9 @@
 package edu.uw;
 
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.io.File;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 
@@ -10,17 +12,45 @@ import edu.uw.TaggerflowProtos.TaggedSentence;
 import edu.uw.TaggerflowProtos.TaggedToken;
 import edu.uw.TaggerflowProtos.TaggingInput;
 import edu.uw.TaggerflowProtos.TaggingResult;
+import edu.uw.TaggerflowProtos.TaggerInitialization;
 
 public class Taggerflow {
     private final long session;
-    public Taggerflow(String model, String spacesDir) {
+    public Taggerflow(File modelPath, double beam) {
         System.loadLibrary("taggerflow");
-        session = initialize(model, spacesDir);
+        session = initialize(TaggerInitialization.newBuilder()
+                             .setModelPath(modelPath.getAbsolutePath())
+                             .setBeam(beam)
+                             .build()
+                             .toByteArray());
     }
 
-    public TaggingResult predict(String filename, int maxBatchSize) {
+    public Iterator<TaggedSentence> predict(String filename, int maxBatchSize) {
+        queueFile(filename, session);
         try {
-            return TaggingResult.parseFrom(predictPacked(filename, maxBatchSize, session));
+            final TaggingResult firstResult = TaggingResult.parseFrom(predictRemaining(maxBatchSize, session));
+            return new Iterator<TaggedSentence>() {
+                TaggingResult result = firstResult;
+                int i = 0;
+
+                @Override
+                public boolean hasNext() {
+                    return i < result.getSentenceCount() || result.getHasMore();
+                }
+
+                @Override
+                public TaggedSentence  next() {
+                    if (i >= result.getSentenceCount()) {
+                        try {
+                            result = TaggingResult.parseFrom(predictRemaining(maxBatchSize, session));
+                            i = 0;
+                        } catch (final InvalidProtocolBufferException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+                    return result.getSentence(i++);
+                }
+            };
         } catch (final InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
         }
@@ -42,11 +72,13 @@ public class Taggerflow {
 
     private static native void close(long session);
 
-    private static native long initialize(String model, String spacesDir);
+    private static native long initialize(byte[] packed);
 
     private static native byte[] predictPacked(byte[] packed, long session);
 
-    private static native byte[] predictPacked(String filename, int maxBatchSize, long session);
+    private static native void queueFile(String filename, long session);
+
+    private static native byte[] predictRemaining(int maxBatchSize, long session);
 
 
     public static void main(String[] args) {
@@ -54,8 +86,8 @@ public class Taggerflow {
             System.err.println("Missing model directory.");
             System.exit(1);
         }
-        final String modelDir = args[0];
-        final Taggerflow tagger = new Taggerflow(modelDir + "/graph.pb", modelDir);
+        final File modelPath = new File(args[0]);
+        final Taggerflow tagger = new Taggerflow(modelPath, 1e-4f);
 
         final TaggingInput.Builder builder = TaggingInput.newBuilder();
         builder.addSentenceBuilder().addAllWord(Arrays.asList("Visiting relatives can be boring .".split(" ")));

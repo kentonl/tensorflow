@@ -18,26 +18,34 @@ JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_close
 /*
  * Class:     edu_uw_Taggerflow
  * Method:    initialize
- * Signature: (Ljava/lang/String;Ljava/lang/String;)J
+ * Signature: ([B)J
  */
 JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize
-  (JNIEnv *, jclass, jstring, jstring);
+  (JNIEnv *, jclass, jbyteArray);
 
 /*
  * Class:     edu_uw_Taggerflow
  * Method:    predictPacked
  * Signature: ([BJ)[B
  */
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked___3BJ
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked
   (JNIEnv *, jclass, jbyteArray, jlong);
 
 /*
  * Class:     edu_uw_Taggerflow
- * Method:    predictPacked
- * Signature: (Ljava/lang/String;IJ)[B
+ * Method:    queueFile
+ * Signature: (Ljava/lang/String;J)V
  */
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked__Ljava_lang_String_2IJ
-  (JNIEnv *, jclass, jstring, jint, jlong);
+JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_queueFile
+  (JNIEnv *, jclass, jstring, jlong);
+
+/*
+ * Class:     edu_uw_Taggerflow
+ * Method:    predictRemaining
+ * Signature: (IJ)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemaining
+  (JNIEnv *, jclass, jint, jlong);
 
 #ifdef __cplusplus
 }

@@ -13,10 +13,11 @@ using namespace tensorflow;
 using namespace taggerflow;
 namespace pb = google::protobuf;
 
-const static int kMaxTokens = 70;
 const static int kNumFeatures = 9;
+const static int kMaxTokens = 70;
+const static int kMaxBucket = 70;
 const static int kBucketSize = 14;
-const static int kNumBuckets = kMaxTokens/kBucketSize;
+const static int kNumBuckets = kMaxBucket/kBucketSize + 1;
 
 struct MetaSession {
   std::unique_ptr<Session> session;
@@ -25,6 +26,10 @@ struct MetaSession {
   int oor_indexes[kNumFeatures];
   int start_indexes[kNumFeatures];
   int end_indexes[kNumFeatures];
+  double beam;
+  std::unique_ptr<std::ifstream> input_stream;
+  pb::Arena arena; // Only used for storing inputs.
+  std::vector<TaggingInput*> buckets;
 };
 
 template <typename Message>
@@ -134,7 +139,7 @@ void read_sentences(const char * filename, TaggingInput *input) {
   }
 }
 
-void parse_input(const TaggingInput& input, MetaSession *meta_session, TaggingResult *result) {
+void tag_input(const TaggingInput& input, MetaSession *meta_session, TaggingResult *result) {
   Tensor indexes(DT_INT32, TensorShape({ input.sentence_size(), kMaxTokens + 2, kNumFeatures }));
   Tensor num_tokens(DT_INT64, TensorShape({ input.sentence_size() }));
 
@@ -169,7 +174,7 @@ void parse_input(const TaggingInput& input, MetaSession *meta_session, TaggingRe
           max_index = k;
         }
       }
-      float prune_threshold = log(1e-5) + max_score;
+      float prune_threshold = meta_session->beam + max_score;
 
       TaggedToken *token = sentence->add_token();
       token->set_word(input.sentence(i).word(j));
@@ -196,18 +201,19 @@ int get_bucket(int sentence_length) {
     return 0;
   }
   if (sentence_length > kMaxTokens) {
-    return -1;
+    return kNumBuckets - 1;
   }
   return (sentence_length - 1) / kBucketSize;
 }
 
-JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize(JNIEnv* env, jclass clazz, jstring model, jstring spaces) {
+JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize(JNIEnv* env, jclass clazz, jbyteArray buffer) {
+  TaggerInitialization initialization;
+  jbytes_to_message(buffer, &initialization, env);
+
   GraphDef graph_def;
   Status  status;
 
-  const char* model_cstr = env->GetStringUTFChars(model, NULL);
-
-  TF_CHECK_OK(ReadBinaryProto(Env::Default(), model_cstr, &graph_def));
+  TF_CHECK_OK(ReadBinaryProto(Env::Default(), initialization.model_path() + "/graph.pb", &graph_def));
 
   MetaSession *meta_session = new MetaSession();
 
@@ -220,18 +226,17 @@ JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize(JNIEnv* env, jclass cl
   // Clear the proto to save memory space.
   graph_def.Clear();
 
-  std::cerr << "Tensorflow graph loaded from: " << model_cstr << std::endl;
+  std::cerr << "Tensorflow graph loaded from: " << initialization.model_path() << std::endl;
 
-  std::string spaces_str = std::string(env->GetStringUTFChars(spaces, NULL));
-  read_feature_map(spaces_str, "words.txt", &meta_session->feature_maps[0]);
-  read_feature_map(spaces_str, "prefix_1.txt", &meta_session->feature_maps[1]);
-  read_feature_map(spaces_str, "prefix_2.txt", &meta_session->feature_maps[2]);
-  read_feature_map(spaces_str, "prefix_3.txt", &meta_session->feature_maps[3]);
-  read_feature_map(spaces_str, "prefix_4.txt", &meta_session->feature_maps[4]);
-  read_feature_map(spaces_str, "suffix_1.txt", &meta_session->feature_maps[5]);
-  read_feature_map(spaces_str, "suffix_2.txt", &meta_session->feature_maps[6]);
-  read_feature_map(spaces_str, "suffix_3.txt", &meta_session->feature_maps[7]);
-  read_feature_map(spaces_str, "suffix_4.txt", &meta_session->feature_maps[8]);
+  read_feature_map(initialization.model_path(), "words.txt", &meta_session->feature_maps[0]);
+  read_feature_map(initialization.model_path(), "prefix_1.txt", &meta_session->feature_maps[1]);
+  read_feature_map(initialization.model_path(), "prefix_2.txt", &meta_session->feature_maps[2]);
+  read_feature_map(initialization.model_path(), "prefix_3.txt", &meta_session->feature_maps[3]);
+  read_feature_map(initialization.model_path(), "prefix_4.txt", &meta_session->feature_maps[4]);
+  read_feature_map(initialization.model_path(), "suffix_1.txt", &meta_session->feature_maps[5]);
+  read_feature_map(initialization.model_path(), "suffix_2.txt", &meta_session->feature_maps[6]);
+  read_feature_map(initialization.model_path(), "suffix_3.txt", &meta_session->feature_maps[7]);
+  read_feature_map(initialization.model_path(), "suffix_4.txt", &meta_session->feature_maps[8]);
 
   // Setup commonly used indexes.
   meta_session->unknown_indexes[0] = meta_session->feature_maps[0].at("*unknown*");
@@ -246,6 +251,8 @@ JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize(JNIEnv* env, jclass cl
     meta_session->start_indexes[i] = meta_session->feature_maps[i].at("<s>");
     meta_session->end_indexes[i] = meta_session->feature_maps[i].at("</s>");
   }
+
+  meta_session->beam = initialization.beam();
 
   return reinterpret_cast<long>(meta_session);
 }
@@ -263,26 +270,27 @@ JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked___3BJ(JNIEnv *
   jbytes_to_message(buffer, input, env);
 
   TaggingResult *result = pb::Arena::CreateMessage<TaggingResult>(&arena);
-  parse_input(*input, reinterpret_cast<MetaSession*>(meta_session_long), result);
+  tag_input(*input, reinterpret_cast<MetaSession*>(meta_session_long), result);
   return message_to_jbytes(*result, env);
 }
 
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked__Ljava_lang_String_2IJ(JNIEnv* env, jclass clazz, jstring filename, jint max_batch_size, jlong meta_session_long) {
+JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_queueFile(JNIEnv *env, jclass clazz, jstring filename, jlong meta_session_long) {
   const char* filename_cstr = env->GetStringUTFChars(filename, NULL);
-  pb::Arena arena;
-
-  std::vector<TaggingInput*> buckets;
-  for (int i = 0; i < kNumBuckets; ++i) {
-    buckets.push_back(pb::Arena::CreateMessage<TaggingInput>(&arena));
-  }
-
   MetaSession *meta_session = reinterpret_cast<MetaSession*>(meta_session_long);
+  meta_session->arena.Reset();
+  meta_session->buckets.clear();
+  for (int i = 0; i < kNumBuckets; ++i) {
+    meta_session->buckets.push_back(pb::Arena::CreateMessage<TaggingInput>(&meta_session->arena));
+  }
+  meta_session->input_stream.reset(new std::ifstream(filename_cstr));
+  env->ReleaseStringUTFChars(filename, filename_cstr);
+}
 
-  std::ifstream file(filename_cstr);
+void tag_next_batch(MetaSession *meta_session, int max_batch_size, pb::Arena *arena, TaggingResult *result) {
   std::string line, buf;
-  TaggingResult *result = pb::Arena::CreateMessage<TaggingResult>(&arena);
-  TaggingInputSentence *sentence = pb::Arena::CreateMessage<TaggingInputSentence>(&arena);
-  while (std::getline(file, line)) {
+  TaggingInputSentence *sentence = pb::Arena::CreateMessage<TaggingInputSentence>(arena);
+  result->set_has_more(true);
+  while (std::getline(*meta_session->input_stream, line)) {
     sentence->Clear();
     std::stringstream ss(line);
     while (ss >> buf) {
@@ -290,29 +298,35 @@ JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked__Ljava_lang_St
     }
     int bucket_index = get_bucket(sentence->word_size());
     if (bucket_index >= 0) {
-      TaggingInput* bucket = buckets.at(bucket_index);
-      if (bucket->sentence_size() >= max_batch_size) {
-        parse_input(*bucket, meta_session, result);
-        bucket->Clear();
-      }
+      TaggingInput* bucket = meta_session->buckets.at(bucket_index);
       bucket->add_sentence()->Swap(sentence);
+      if (bucket->sentence_size() >= max_batch_size) {
+        tag_input(*bucket, meta_session, result);
+        bucket->Clear();
+        return;
+      }
     }
   }
-
-  env->ReleaseStringUTFChars(filename, filename_cstr);
-
-  TaggingInput *merged = buckets[0];
-  for (unsigned i = 1; i < buckets.size(); ++i) {
-    for (TaggingInputSentence &sentence : *(buckets[i]->mutable_sentence())) {
+  result->set_has_more(false);
+  TaggingInput *merged = meta_session->buckets[0];
+  for (unsigned i = 1; i < meta_session->buckets.size(); ++i) {
+    for (TaggingInputSentence &sentence : *(meta_session->buckets[i]->mutable_sentence())) {
+      merged->add_sentence()->Swap(&sentence);
       if (merged->sentence_size() >= max_batch_size) {
-        parse_input(*merged, meta_session, result);
+        tag_input(*merged, meta_session, result);
         merged->Clear();
       }
-      merged->add_sentence()->Swap(&sentence);
     }
   }
   if (merged->sentence_size() > 0) {
-    parse_input(*merged, meta_session, result);
+    tag_input(*merged, meta_session, result);
   }
+}
+
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemaining(JNIEnv* env, jclass clazz, jint max_batch_size, jlong meta_session_long) {
+  MetaSession *meta_session = reinterpret_cast<MetaSession*>(meta_session_long);
+  pb::Arena arena;
+  TaggingResult *result = pb::Arena::CreateMessage<TaggingResult>(&arena);
+  tag_next_batch(meta_session, max_batch_size, &arena, result);
   return message_to_jbytes(*result, env);
 }

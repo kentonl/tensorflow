@@ -5,8 +5,14 @@ option java_outer_classname = "TaggerflowProtos";
 option java_package = "edu.uw";
 option cc_enable_arenas = true;
 
+message TaggerInitialization {
+  string model_path = 1;
+  double beam = 2;
+}
+
 message TaggingResult {
   repeated TaggedSentence sentence = 1;
+  bool has_more = 2;
 }
 
 message TaggingInput {
