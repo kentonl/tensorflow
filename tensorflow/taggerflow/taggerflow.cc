@@ -264,7 +264,7 @@ JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_close(JNIEnv *env, jclass clazz, j
   std::cerr << "Tensorflow session closed." << std::endl;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked___3BJ(JNIEnv *env, jclass clazz, jbyteArray buffer, jlong meta_session_long) {
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked(JNIEnv *env, jclass clazz, jbyteArray buffer, jlong meta_session_long) {
   pb::Arena arena;
   TaggingInput *input = pb::Arena::CreateMessage<TaggingInput>(&arena);
   jbytes_to_message(buffer, input, env);
