@@ -174,7 +174,7 @@ void tag_input(const TaggingInput& input, MetaSession *meta_session, TaggingResu
           max_index = k;
         }
       }
-      float prune_threshold = meta_session->beam + max_score;
+      float prune_threshold = log(meta_session->beam) + max_score;
 
       TaggedToken *token = sentence->add_token();
       token->set_word(input.sentence(i).word(j));
@@ -200,7 +200,7 @@ int get_bucket(int sentence_length) {
   if (sentence_length == 0) {
     return 0;
   }
-  if (sentence_length > kMaxTokens) {
+  if (sentence_length > kMaxBucket) {
     return kNumBuckets - 1;
   }
   return (sentence_length - 1) / kBucketSize;
