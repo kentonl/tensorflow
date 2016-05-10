@@ -30,6 +30,8 @@ struct MetaSession {
   std::unique_ptr<std::ifstream> input_stream;
   pb::Arena arena; // Only used for storing inputs.
   std::vector<TaggingInput*> buckets;
+  pb::internal::RepeatedPtrIterator<TaggedSentence> result_iterator;
+  TaggingResult result;
 };
 
 template <typename Message>
@@ -174,22 +176,29 @@ void tag_input(const TaggingInput& input, MetaSession *meta_session, TaggingResu
           max_index = k;
         }
       }
-      float prune_threshold = log(meta_session->beam) + max_score;
 
       TaggedToken *token = sentence->add_token();
       token->set_word(input.sentence(i).word(j));
 
-      // Max score goes first.
-      SparseValue *score = token->add_score();
-      score->set_index(max_index);
-      score->set_value(max_score);
+      if (meta_session->beam > 0) {
+        float prune_threshold = log(meta_session->beam) + max_score;
 
-      // Adding the remaining supertags that score above the threshold.
-      for (int k = 0; k < num_supertags; ++k) {
-        if (scores(i,j+1,k) > prune_threshold && k != max_index) {
-          SparseValue *score = token->add_score();
-          score->set_index(k);
-          score->set_value(scores(i,j+1,k));
+        // Max score goes first.
+        SparseValue *score = token->add_score();
+        score->set_index(max_index);
+        score->set_value(max_score);
+
+        // Adding the remaining supertags that score above the threshold.
+        for (int k = 0; k < num_supertags; ++k) {
+          if (scores(i,j+1,k) > prune_threshold && k != max_index) {
+            SparseValue *score = token->add_score();
+            score->set_index(k);
+            score->set_value(scores(i,j+1,k));
+          }
+        }
+      } else {
+        for (int k = 0; k < num_supertags; ++k) {
+          token->add_dense_score(scores(i,j+1,k));
         }
       }
     }
@@ -264,14 +273,24 @@ JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_close(JNIEnv *env, jclass clazz, j
   std::cerr << "Tensorflow session closed." << std::endl;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked(JNIEnv *env, jclass clazz, jbyteArray buffer, jlong meta_session_long) {
+JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_queueInput(JNIEnv *env, jclass clazz, jbyteArray buffer, jlong meta_session_long) {
   pb::Arena arena;
   TaggingInput *input = pb::Arena::CreateMessage<TaggingInput>(&arena);
   jbytes_to_message(buffer, input, env);
 
-  TaggingResult *result = pb::Arena::CreateMessage<TaggingResult>(&arena);
-  tag_input(*input, reinterpret_cast<MetaSession*>(meta_session_long), result);
-  return message_to_jbytes(*result, env);
+  MetaSession *meta_session = reinterpret_cast<MetaSession*>(meta_session_long);
+  meta_session->result.Clear();
+  tag_input(*input, reinterpret_cast<MetaSession*>(meta_session_long), &meta_session->result);
+  meta_session->result_iterator = meta_session->result.mutable_sentence()->begin();
+}
+
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemainingFromInput(JNIEnv *env, jclass clazz, jlong meta_session_long) {
+  MetaSession *meta_session = reinterpret_cast<MetaSession*>(meta_session_long);
+  TaggingResult result;
+  meta_session->result_iterator->Swap(result.add_sentence());
+  meta_session->result_iterator++;
+  result.set_has_more(meta_session->result_iterator != meta_session->result.mutable_sentence()->end());
+  return message_to_jbytes(result, env);
 }
 
 JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_queueFile(JNIEnv *env, jclass clazz, jstring filename, jlong meta_session_long) {
@@ -323,7 +342,7 @@ void tag_next_batch(MetaSession *meta_session, int max_batch_size, pb::Arena *ar
   }
 }
 
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemaining(JNIEnv* env, jclass clazz, jint max_batch_size, jlong meta_session_long) {
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemainingFromFile(JNIEnv* env, jclass clazz, jint max_batch_size, jlong meta_session_long) {
   MetaSession *meta_session = reinterpret_cast<MetaSession*>(meta_session_long);
   pb::Arena arena;
   TaggingResult *result = pb::Arena::CreateMessage<TaggingResult>(&arena);

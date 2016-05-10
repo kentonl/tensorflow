@@ -25,11 +25,19 @@ JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize
 
 /*
  * Class:     edu_uw_Taggerflow
- * Method:    predictPacked
- * Signature: ([BJ)[B
+ * Method:    queueInput
+ * Signature: ([BJ)V
  */
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictPacked
+JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_queueInput
   (JNIEnv *, jclass, jbyteArray, jlong);
+
+/*
+ * Class:     edu_uw_Taggerflow
+ * Method:    predictRemainingFromInput
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemainingFromInput
+  (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     edu_uw_Taggerflow
@@ -41,10 +49,10 @@ JNIEXPORT void JNICALL Java_edu_uw_Taggerflow_queueFile
 
 /*
  * Class:     edu_uw_Taggerflow
- * Method:    predictRemaining
+ * Method:    predictRemainingFromFile
  * Signature: (IJ)[B
  */
-JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemaining
+JNIEXPORT jbyteArray JNICALL Java_edu_uw_Taggerflow_predictRemainingFromFile
   (JNIEnv *, jclass, jint, jlong);
 
 #ifdef __cplusplus

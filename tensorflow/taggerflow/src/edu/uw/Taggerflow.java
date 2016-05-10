@@ -2,7 +2,10 @@ package edu.uw;
 
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import java.util.List;
+import java.util.function.Supplier;
 import java.io.File;
 
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -25,43 +28,49 @@ public class Taggerflow {
                              .toByteArray());
     }
 
-    public Iterator<TaggedSentence> predict(String filename, int maxBatchSize) {
+    public Stream<TaggedSentence> predict(String filename, int maxBatchSize) {
         queueFile(filename, session);
-        try {
-            final TaggingResult firstResult = TaggingResult.parseFrom(predictRemaining(maxBatchSize, session));
-            return new Iterator<TaggedSentence>() {
-                TaggingResult result = firstResult;
-                int i = 0;
-
-                @Override
-                public boolean hasNext() {
-                    return i < result.getSentenceCount() || result.getHasMore();
+        return predictionStream(() -> {
+                try {
+                    return TaggingResult.parseFrom(predictRemainingFromFile(maxBatchSize, session));
+                } catch (final InvalidProtocolBufferException e) {
+                    throw new RuntimeException(e);
                 }
-
-                @Override
-                public TaggedSentence  next() {
-                    if (i >= result.getSentenceCount()) {
-                        try {
-                            result = TaggingResult.parseFrom(predictRemaining(maxBatchSize, session));
-                            i = 0;
-                        } catch (final InvalidProtocolBufferException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-                    return result.getSentence(i++);
-                }
-            };
-        } catch (final InvalidProtocolBufferException e) {
-            throw new RuntimeException(e);
-        }
+            });
     }
 
-    public TaggingResult predict(TaggingInput input) {
-        try {
-            return TaggingResult.parseFrom(predictPacked(input.toByteArray(), session));
-        } catch (final InvalidProtocolBufferException e) {
-            throw new RuntimeException(e);
-        }
+    public Stream<TaggedSentence> predict(TaggingInput input) {
+        queueInput(input.toByteArray(), session);
+        return predictionStream(() -> {
+                try {
+                    return TaggingResult.parseFrom(predictRemainingFromInput(session));
+                } catch (final InvalidProtocolBufferException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+    }
+
+    public Stream<TaggedSentence> predictionStream(Supplier<TaggingResult> resultSupplier) {
+        final TaggingResult firstResult = resultSupplier.get();
+        final Iterable<TaggedSentence> sentenceIterable = () -> new Iterator<TaggedSentence>() {
+            TaggingResult result = firstResult;
+            int i = 0;
+
+            @Override
+            public boolean hasNext() {
+                return i < result.getSentenceCount() || result.getHasMore();
+            }
+
+            @Override
+            public TaggedSentence next() {
+                if (i >= result.getSentenceCount()) {
+                    result = resultSupplier.get();
+                    i = 0;
+                }
+                return result.getSentence(i++);
+            }
+        };
+        return StreamSupport.stream(sentenceIterable.spliterator(), false);
     }
 
     @Override
@@ -74,12 +83,11 @@ public class Taggerflow {
 
     private static native long initialize(byte[] packed);
 
-    private static native byte[] predictPacked(byte[] packed, long session);
+    private static native void queueInput(byte[] packedInput, long session);
+    private static native byte[] predictRemainingFromInput(long session);
 
     private static native void queueFile(String filename, long session);
-
-    private static native byte[] predictRemaining(int maxBatchSize, long session);
-
+    private static native byte[] predictRemainingFromFile(int maxBatchSize, long session);
 
     public static void main(String[] args) {
         if (args.length != 1) {
@@ -91,9 +99,8 @@ public class Taggerflow {
 
         final TaggingInput.Builder builder = TaggingInput.newBuilder();
         builder.addSentenceBuilder().addAllWord(Arrays.asList("Visiting relatives can be boring .".split(" ")));
-        final TaggingResult result = tagger.predict(builder.build());
 
-        final TaggedSentence sentence = result.getSentence(0);
+        final TaggedSentence sentence = tagger.predict(builder.build()).findFirst().get();
         for (final TaggedToken token : sentence.getTokenList()) {
             System.out.print(token.getWord());
             for (final SparseValue score : token.getScoreList()) {
