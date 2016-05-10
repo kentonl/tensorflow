@@ -30,6 +30,7 @@ message TaggedSentence {
 message TaggedToken {
   string word = 1;
   repeated SparseValue score = 2;
+  repeated float dense_score = 3 [packed=true];
 }
 
 message SparseValue {
