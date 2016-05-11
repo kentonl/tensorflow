@@ -14,7 +14,6 @@ using namespace taggerflow;
 namespace pb = google::protobuf;
 
 const static int kNumFeatures = 9;
-const static int kMaxTokens = 70;
 const static int kMaxBucket = 70;
 const static int kBucketSize = 14;
 const static int kNumBuckets = kMaxBucket/kBucketSize + 1;
@@ -22,6 +21,7 @@ const static int kNumBuckets = kMaxBucket/kBucketSize + 1;
 struct MetaSession {
   std::unique_ptr<Session> session;
   std::unordered_map<std::string, int> feature_maps[kNumFeatures];
+  int max_tokens;
   int unknown_indexes[kNumFeatures];
   int oor_indexes[kNumFeatures];
   int start_indexes[kNumFeatures];
@@ -102,7 +102,7 @@ void extract_features(const TaggingInput& input, const MetaSession& meta_session
     ++j;
 
     const TaggingInputSentence& sentence = input.sentence(i);
-    if (sentence.word_size() <= kMaxTokens) {
+    if (sentence.word_size() <= meta_session.max_tokens) {
       for (const std::string &word : sentence.word()) {
         indexes_tensor(i,j,0) = get_word_feature_index(word, 0, meta_session);
         indexes_tensor(i,j,1) = get_morpho_feature_index(word, 1, true, 1, meta_session);
@@ -121,7 +121,7 @@ void extract_features(const TaggingInput& input, const MetaSession& meta_session
     }
     ++j;
     num_tokens_tensor(i) = j;
-    for (; j < kMaxTokens + 2; ++j) {
+    for (; j < meta_session.max_tokens + 2; ++j) {
       for (int k = 0; k < kNumFeatures; ++k) {
         indexes_tensor(i,j,k) = 0;
       }
@@ -142,7 +142,7 @@ void read_sentences(const char * filename, TaggingInput *input) {
 }
 
 void tag_input(const TaggingInput& input, MetaSession *meta_session, TaggingResult *result) {
-  Tensor indexes(DT_INT32, TensorShape({ input.sentence_size(), kMaxTokens + 2, kNumFeatures }));
+  Tensor indexes(DT_INT32, TensorShape({ input.sentence_size(), meta_session->max_tokens + 2, kNumFeatures }));
   Tensor num_tokens(DT_INT64, TensorShape({ input.sentence_size() }));
 
   std::vector<std::pair<std::string, Tensor>> inputs = {
@@ -231,6 +231,16 @@ JNIEXPORT jlong JNICALL Java_edu_uw_Taggerflow_initialize(JNIEnv* env, jclass cl
   options.config.set_allow_soft_placement(true);
   meta_session->session.reset(NewSession(options));
   TF_CHECK_OK(meta_session->session->Create(graph_def));
+
+  // Get the max number of tokens from the graph.
+  for (const auto &node : graph_def.node()) {
+    if (node.name() == "frozen/model/prediction/scores/shape") {
+      Tensor t;
+      CHECK(t.FromProto(node.attr().at("value").tensor()));
+      meta_session->max_tokens = t.vec<int32>()(1) - 2;
+      std::cerr << "Maximum sentence length: " << meta_session->max_tokens << std::endl;
+    }
+  }
 
   // Clear the proto to save memory space.
   graph_def.Clear();
