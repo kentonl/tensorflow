@@ -466,3 +466,9 @@ http_file(
   name = "weblas_weblas_js",
   url = "https://raw.githubusercontent.com/waylonflinn/weblas/v0.9.0/dist/weblas.js",
 )
+
+git_repository(
+  name = "io_bazel",
+  remote = "https://github.com/bazelbuild/bazel.git",
+  tag = "0.4.1",
+)
