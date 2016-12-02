@@ -220,16 +220,6 @@ new_http_archive(
   strip_prefix = "iron-validatable-behavior-1.1.1",
 )
 
-# Replace the following with your local path to Java.
-new_local_repository(
-    name = "jni",
-    build_file = "jni.BUILD",
-    # Mac
-    #path = "/Library/Java/JavaVirtualMachines/jdk1.8.0_60.jdk/Contents/Home/include",
-    # Ubuntu
-    path = "/usr/lib/jvm/java-8-oracle/include",
-)
-
 new_http_archive(
   name = "lodash",
   build_file = "bower.BUILD",
@@ -471,4 +461,14 @@ git_repository(
   name = "io_bazel",
   remote = "https://github.com/bazelbuild/bazel.git",
   tag = "0.4.1",
+)
+
+# Replace the following with your local path to Java.
+new_local_repository(
+    name = "jni",
+    build_file = "jni.BUILD",
+    # Mac
+    #path = "/Library/Java/JavaVirtualMachines/jdk1.8.0_60.jdk/Contents/Home/include",
+    # Ubuntu
+    path = "/usr/lib/jvm/java-8-oracle/include",
 )

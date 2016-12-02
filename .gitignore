@@ -1,8 +1,5 @@
-deploy.sh
-deploy_pip.sh
 .DS_Store
 .ipynb_checkpoints
->>>>>>> 2ec4e1ddb287868c19cd4de10517af43492908f0
 node_modules
 /bazel-bin
 /bazel-ci_build-cache
